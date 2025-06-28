@@ -171,7 +171,10 @@ async def scrape_url_content(url: str) -> ScrapedContent:
             # Extraer todo el contenido HTML
             html_content = await page.content()
             
-            # Extraer enlaces de imágenes
+            # Esperar 5 segundos adicionales antes de comenzar el scraping (solicitado por el usuario)
+            await page.wait_for_timeout(5000)
+            
+            # Extraer enlaces de imágenes (todas las imágenes, no solo las primeras 20)
             images = await page.evaluate('''
                 () => {
                     const imgs = Array.from(document.querySelectorAll('img'));
@@ -207,6 +210,24 @@ async def scrape_url_content(url: str) -> ScrapedContent:
             # Crear objeto BeautifulSoup para análisis adicional
             soup = BeautifulSoup(html_content, 'html.parser')
             
+            # Extraer HTML del body sin scripts ni estilos
+            body_soup = soup.find('body')
+            if body_soup:
+                # Eliminar scripts y estilos
+                for tag in body_soup(['script', 'style']):
+                    tag.decompose()
+                clean_body_html = str(body_soup)
+            else:
+                clean_body_html = ""
+            
+            # Extraer emails
+            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            emails = list(set(re.findall(email_pattern, soup.get_text())))
+            
+            # Extraer números de teléfono
+            phone_pattern = r'[\+]?[1-9]?[\d\s\-\(\)]{7,15}'
+            phones = list(set(re.findall(phone_pattern, soup.get_text())))
+            
             # Extraer montos
             amounts = processor.extract_amounts(soup.get_text())
             
@@ -222,7 +243,9 @@ async def scrape_url_content(url: str) -> ScrapedContent:
                 "amounts_found": len(amounts),
                 "has_tables": len(structured_data["tables"]) > 0,
                 "has_lists": len(structured_data["lists"]) > 0,
-                "headings_count": sum(len(headings) for headings in structured_data["headings"].values())
+                "headings_count": sum(len(headings) for headings in structured_data["headings"].values()),
+                "emails_found": len(emails),
+                "phones_found": len(phones)
             }
             
             return ScrapedContent(
@@ -230,10 +253,15 @@ async def scrape_url_content(url: str) -> ScrapedContent:
                 title=title,
                 markdown_content=markdown_content,
                 metadata=metadata,
-                images=images[:20],  # Limitar a 20 imágenes
+                images=images,  # Ya no limitamos a 20 imágenes
                 links=links[:50],    # Limitar a 50 enlaces
                 amounts=amounts,
-                structured_data=structured_data
+                structured_data={
+                    **structured_data,
+                    "clean_body_html": clean_body_html,
+                    "emails": emails,
+                    "phones": phones
+                }
             )
             
     except Exception as e:
