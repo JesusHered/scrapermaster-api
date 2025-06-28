@@ -136,103 +136,132 @@ async def scrape_url_content(url: str) -> ScrapedContent:
     try:
         async with async_playwright() as p:
             # Usar Chromium con configuración optimizada
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-web-security',
-                    '--disable-features=VizDisplayCompositor'
-                ]
-            )
+            try:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=[
+                        '--no-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-gpu',
+                        '--disable-web-security',
+                        '--disable-features=VizDisplayCompositor'
+                    ]
+                )
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error al iniciar el navegador: {str(e)}")
             
-            context = await browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                locale='en-US',  # Establecer idioma como inglés americano
-                timezone_id='America/New_York',  # Usar zona horaria estadounidense para coherencia
-                accept_language='en-US,en;q=0.9'  # Preferir contenido en inglés
-            )
+            try:
+                context = await browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    locale='en-US',  # Establecer idioma como inglés americano
+                    timezone_id='America/New_York',  # Usar zona horaria estadounidense para coherencia
+                    accept_language='en-US,en;q=0.9'  # Preferir contenido en inglés
+                )
+                
+                page = await context.new_page()
+            except Exception as e:
+                await browser.close()
+                raise HTTPException(status_code=500, detail=f"Error al crear contexto del navegador: {str(e)}")
             
-            page = await context.new_page()
-            
-            # Navegar a la URL con timeout
-            await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            try:
+                # Navegar a la URL con timeout
+                await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            except asyncio.TimeoutError:
+                await browser.close()
+                raise HTTPException(status_code=504, detail="Tiempo de espera agotado al cargar la página")
+            except Exception as e:
+                await browser.close()
+                raise HTTPException(status_code=500, detail=f"Error al navegar a la URL: {str(e)}")
             
             # Intentar manejar diálogos de cookies comunes
-            await handle_cookie_dialogs(page)
+            try:
+                await handle_cookie_dialogs(page)
+            except Exception as e:
+                print(f"Advertencia: Error al manejar diálogos de cookies: {str(e)}")
+                # No fallamos por esto, continuamos con el proceso
             
             # Esperar a que la página se cargue completamente (5 segundos)
             await page.wait_for_timeout(5000)
             
-            # Extraer información básica
-            title = await page.title()
-            
-            # Extraer todo el contenido HTML
-            html_content = await page.content()
+            try:
+                # Extraer información básica
+                title = await page.title()
+                
+                # Extraer todo el contenido HTML
+                html_content = await page.content()
+            except Exception as e:
+                await browser.close()
+                raise HTTPException(status_code=500, detail=f"Error al extraer contenido básico de la página: {str(e)}")
             
             # Esperar 5 segundos adicionales antes de comenzar el scraping (solicitado por el usuario)
             await page.wait_for_timeout(5000)
             
-            # Extraer enlaces de imágenes (todas las imágenes, no solo las primeras 20)
-            images = await page.evaluate('''
-                () => {
-                    const imgs = Array.from(document.querySelectorAll('img'));
-                    return imgs.map(img => {
-                        const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
-                        return src;
-                    }).filter(src => src && src.startsWith('http'));
-                }
-            ''')
-            
-            # Extraer enlaces
-            links = await page.evaluate('''
-                () => {
-                    const links = Array.from(document.querySelectorAll('a[href]'));
-                    return links.map(link => ({
-                        text: link.textContent.trim(),
-                        url: link.href
-                    })).filter(link => link.text && link.url);
-                }
-            ''')
+            try:
+                # Extraer enlaces de imágenes (todas las imágenes, no solo las primeras 20)
+                images = await page.evaluate('''
+                    () => {
+                        const imgs = Array.from(document.querySelectorAll('img'));
+                        return imgs.map(img => {
+                            const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
+                            return src;
+                        }).filter(src => src && src.startsWith('http'));
+                    }
+                ''')
+                
+                # Extraer enlaces
+                links = await page.evaluate('''
+                    () => {
+                        const links = Array.from(document.querySelectorAll('a[href]'));
+                        return links.map(link => ({
+                            text: link.textContent.trim(),
+                            url: link.href
+                        })).filter(link => link.text && link.url);
+                    }
+                ''')
+            except Exception as e:
+                await browser.close()
+                raise HTTPException(status_code=500, detail=f"Error al extraer imágenes y enlaces: {str(e)}")
             
             await browser.close()
             
             # Procesar el contenido
-            processor = ContentProcessor()
-            
-            # Limpiar y organizar HTML
-            clean_html = processor.clean_and_organize_content(html_content)
-            
-            # Convertir a markdown
-            markdown_content = md(clean_html, heading_style="ATX")
-            
-            # Crear objeto BeautifulSoup para análisis adicional
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
-            # Extraer HTML del body sin scripts ni estilos
-            body_soup = soup.find('body')
-            if body_soup:
-                # Eliminar scripts y estilos
-                for tag in body_soup(['script', 'style']):
-                    tag.decompose()
-                clean_body_html = str(body_soup)
-            else:
-                clean_body_html = ""
-            
-            # Extraer emails
-            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-            emails = list(set(re.findall(email_pattern, soup.get_text())))
-            
-            # Extraer números de teléfono
-            phone_pattern = r'[\+]?[1-9]?[\d\s\-\(\)]{7,15}'
-            phones = list(set(re.findall(phone_pattern, soup.get_text())))
-            
-            # Extraer montos
-            amounts = processor.extract_amounts(soup.get_text())
-            
-            # Extraer datos estructurados
-            structured_data = processor.extract_structured_data(soup)
+            try:
+                processor = ContentProcessor()
+                
+                # Limpiar y organizar HTML
+                clean_html = processor.clean_and_organize_content(html_content)
+                
+                # Convertir a markdown
+                markdown_content = md(clean_html, heading_style="ATX")
+                
+                # Crear objeto BeautifulSoup para análisis adicional
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                # Extraer HTML del body sin scripts ni estilos
+                body_soup = soup.find('body')
+                if body_soup:
+                    # Eliminar scripts y estilos
+                    for tag in body_soup(['script', 'style']):
+                        tag.decompose()
+                    clean_body_html = str(body_soup)
+                else:
+                    clean_body_html = ""
+                
+                # Extraer emails
+                email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+                emails = list(set(re.findall(email_pattern, soup.get_text())))
+                
+                # Extraer números de teléfono
+                phone_pattern = r'[\+]?[1-9]?[\d\s\-\(\)]{7,15}'
+                phones = list(set(re.findall(phone_pattern, soup.get_text())))
+                
+                # Extraer montos
+                amounts = processor.extract_amounts(soup.get_text())
+                
+                # Extraer datos estructurados
+                structured_data = processor.extract_structured_data(soup)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error al procesar el contenido HTML: {str(e)}")
             
             # Crear metadata
             metadata = {
@@ -264,8 +293,12 @@ async def scrape_url_content(url: str) -> ScrapedContent:
                 }
             )
             
+    except HTTPException as e:
+        # Re-lanzar excepciones HTTP ya formateadas
+        raise e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al procesar la URL: {str(e)}")
+        print(f"Error no controlado en scrape_url_content: {type(e).__name__} - {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error inesperado al procesar la URL: {str(e)}")
 
 async def capture_screenshots_playwright(url: str, output_dir: str) -> Dict[str, str]:
     """Captura capturas de pantalla de toda la página usando Playwright."""
@@ -365,8 +398,31 @@ async def get_screenshots(url_request: UrlRequest):
             "total_screenshots": len(screenshots_base64)
         })
         
+    except HTTPException as e:
+        # Re-lanzar excepciones HTTP ya formateadas
+        raise e
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail=f"Tiempo de espera agotado al capturar screenshots de: {url}. La página tardó demasiado en responder.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error capturando screenshots: {str(e)}")
+        # Obtener información detallada del error
+        error_type = type(e).__name__
+        error_msg = str(e)
+        
+        # Crear mensaje de error detallado basado en el tipo de error
+        if "Playwright" in error_type or "Browser" in error_type:
+            error_detail = f"Error en el navegador al capturar screenshots de {url}: {error_msg}"
+        elif "Connection" in error_type or "Network" in error_type:
+            error_detail = f"Error de conexión al acceder a {url} para capturas: {error_msg}"
+        elif "SSL" in error_type:
+            error_detail = f"Error de seguridad SSL al acceder a {url}: {error_msg}"
+        else:
+            error_detail = f"Error inesperado al capturar screenshots de {url}: {error_type} - {error_msg}"
+        
+        # Registrar el error para depuración
+        print(f"ERROR en /screenshots: {error_detail}")
+        
+        # Devolver respuesta de error detallada
+        raise HTTPException(status_code=500, detail=error_detail)
 
 @app.get("/.well-known/appspecific/com.chrome.devtools.json")
 def chrome_devtools_config():
@@ -409,8 +465,31 @@ async def scrape_url(request: UrlRequest):
     try:
         result = await scrape_url_content(url_str)
         return result
+    except HTTPException as e:
+        # Re-lanzar excepciones HTTP ya formateadas
+        raise e
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail=f"Tiempo de espera agotado al procesar la URL: {url_str}. La página tardó demasiado en responder.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error procesando la URL: {str(e)}")
+        # Obtener información detallada del error
+        error_type = type(e).__name__
+        error_msg = str(e)
+        
+        # Crear mensaje de error detallado basado en el tipo de error
+        if "Playwright" in error_type or "Browser" in error_type:
+            error_detail = f"Error en el navegador al procesar {url_str}: {error_msg}"
+        elif "Connection" in error_type or "Network" in error_type or "Socket" in error_type:
+            error_detail = f"Error de conexión al acceder a {url_str}: {error_msg}"
+        elif "SSL" in error_type or "Certificate" in error_type:
+            error_detail = f"Error de seguridad SSL al acceder a {url_str}: {error_msg}"
+        else:
+            error_detail = f"Error inesperado al procesar {url_str}: {error_type} - {error_msg}"
+        
+        # Registrar el error para depuración
+        print(f"ERROR en /scrape: {error_detail}")
+        
+        # Devolver respuesta de error detallada
+        raise HTTPException(status_code=500, detail=error_detail)
 
 @app.get("/health")
 def health_check():
