@@ -24,7 +24,10 @@ async def scrape_url_content(url: str) -> ScrapedContent:
             )
             
             context = await browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                locale='en-US',  # Establecer idioma como inglés americano
+                timezone_id='America/New_York',  # Usar zona horaria estadounidense para coherencia
+                accept_language='en-US,en;q=0.9'  # Preferir contenido en inglés
             )
             page = await context.new_page()
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)

@@ -148,7 +148,10 @@ async def scrape_url_content(url: str) -> ScrapedContent:
             )
             
             context = await browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                locale='en-US',  # Establecer idioma como inglés americano
+                timezone_id='America/New_York',  # Usar zona horaria estadounidense para coherencia
+                accept_language='en-US,en;q=0.9'  # Preferir contenido en inglés
             )
             
             page = await context.new_page()
@@ -256,7 +259,10 @@ async def capture_screenshots_playwright(url: str, output_dir: str) -> Dict[str,
             
             context = await browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                viewport={'width': 1920, 'height': 1080}
+                viewport={'width': 1920, 'height': 1080},
+                locale='en-US',  # Establecer idioma como inglés americano
+                timezone_id='America/New_York',  # Usar zona horaria estadounidense para coherencia
+                accept_language='en-US,en;q=0.9'  # Preferir contenido en inglés
             )
             
             page = await context.new_page()
@@ -386,27 +392,32 @@ def health_check():
 async def handle_cookie_dialogs(page):
     """Maneja diálogos comunes de consentimiento de cookies en varios sitios web."""
     try:
-        # Caso específico para YouTube
-        youtube_consent_buttons = [
-            'Acepto',  # Español
-            'Aceptar todo',  # Español
-            'Aceptar',  # Español
-            'Acepto todas',  # Español
-            'I Accept',  # Inglés
-            'Accept All',  # Inglés
-            'Accept',  # Inglés
-            'Agree to all',  # Inglés
-            'Agree',  # Inglés
-            'Alle akzeptieren',  # Alemán
-            'Tout accepter',  # Francés
-            'Accetta tutto'  # Italiano
+        # Botones de consentimiento en inglés principalmente (ya que ahora se configura el idioma en inglés)
+        consent_buttons = [
+            'I Accept',
+            'Accept All',
+            'Accept',
+            'Agree to all',
+            'Agree',
+            'Continue',
+            'OK',
+            'Got it',
+            'Allow',
+            'Allow all',
+            'Allow cookies',
+            'Allow all cookies',
+            'Yes',
+            # Mantener algunos botones en otros idiomas por si acaso
+            'Acepto',
+            'Aceptar',
+            'Alle akzeptieren'
         ]
         
         # Espera un breve momento para que los diálogos aparezcan
         await page.wait_for_timeout(1000)
         
-        # Primero intenta con selectores específicos para YouTube
-        for button in youtube_consent_buttons:
+        # Primero intenta con botones de consentimiento comunes
+        for button in consent_buttons:
             try:
                 # Intenta hacer clic en botones con texto exacto
                 await page.click(f'text="{button}"', timeout=2000)
@@ -451,7 +462,7 @@ async def handle_cookie_dialogs(page):
             for frame in frames:
                 try:
                     # Intenta hacer clic en botones de aceptación dentro de iframes
-                    for button in youtube_consent_buttons:
+                    for button in consent_buttons:
                         try:
                             if await frame.locator(f'text="{button}"').count() > 0:
                                 await frame.click(f'text="{button}"', timeout=2000)
