@@ -24,6 +24,7 @@ class ScrapedContent(BaseModel):
     url: str
     title: str
     markdown_content: str
+    clean_body_html: str
     metadata: Dict
     images: List[str]
     links: List[Dict[str, str]]
@@ -88,14 +89,28 @@ class ContentProcessor:
         # Extraer información de contacto
         text = soup.get_text()
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        phone_pattern = r'[\+]?[1-9]?[\d\s\-\(\)]{7,15}'
+        phone_pattern = r'(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}|\+?[1-9][0-9]{1,3}[-.\s]?[0-9]{2,4}[-.\s]?[0-9]{2,4}[-.\s]?[0-9]{2,4}'
         
         emails = re.findall(email_pattern, text)
-        phones = re.findall(phone_pattern, text)
+        phones = [phone.strip() for phone in re.findall(phone_pattern, text) if phone.strip() and not phone.strip().isspace() and len(phone.strip()) > 6 and any(c.isdigit() for c in phone)]
+        
+        # Extraer nombres de contactos (patrones comunes)
+        name_patterns = [
+            r'\b(?:Contact|Contacto|Contact Person|Contact Name):\s*([A-Z][a-z]+\s+[A-Z][a-z]+)',
+            r'\b(?:Name|Nombre):\s*([A-Z][a-z]+\s+[A-Z][a-z]+)',
+            r'\b([A-Z][a-z]+\s+[A-Z][a-z]+)\s*,\s*(?:Director|Manager|CEO|President|VP)',
+            r'\b(?:Dr\.|Mr\.|Mrs\.|Ms\.)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)'
+        ]
+        
+        contact_names = []
+        for pattern in name_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            contact_names.extend(matches)
         
         structured["contact_info"] = {
             "emails": list(set(emails)),
-            "phones": list(set(phones))
+            "phones": list(set(phones)),
+            "names": list(set(contact_names))
         }
         
         # Extraer fechas
@@ -154,8 +169,7 @@ async def scrape_url_content(url: str) -> ScrapedContent:
                 context = await browser.new_context(
                     user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                     locale='en-US',  # Establecer idioma como inglés americano
-                    timezone_id='America/New_York',  # Usar zona horaria estadounidense para coherencia
-                    accept_language='en-US,en;q=0.9'  # Preferir contenido en inglés
+                    timezone_id='America/New_York'  # Usar zona horaria estadounidense para coherencia
                 )
                 
                 page = await context.new_page()
@@ -252,8 +266,8 @@ async def scrape_url_content(url: str) -> ScrapedContent:
                 emails = list(set(re.findall(email_pattern, soup.get_text())))
                 
                 # Extraer números de teléfono
-                phone_pattern = r'[\+]?[1-9]?[\d\s\-\(\)]{7,15}'
-                phones = list(set(re.findall(phone_pattern, soup.get_text())))
+                phone_pattern = r'(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}|\+?[1-9][0-9]{1,3}[-.\s]?[0-9]{2,4}[-.\s]?[0-9]{2,4}[-.\s]?[0-9]{2,4}'
+                phones = [phone.strip() for phone in re.findall(phone_pattern, soup.get_text()) if phone.strip() and not phone.strip().isspace() and len(phone.strip()) > 6 and any(c.isdigit() for c in phone)]
                 
                 # Extraer montos
                 amounts = processor.extract_amounts(soup.get_text())
@@ -281,13 +295,13 @@ async def scrape_url_content(url: str) -> ScrapedContent:
                 url=url,
                 title=title,
                 markdown_content=markdown_content,
+                clean_body_html=clean_body_html,
                 metadata=metadata,
                 images=images,  # Ya no limitamos a 20 imágenes
                 links=links[:50],    # Limitar a 50 enlaces
                 amounts=amounts,
                 structured_data={
                     **structured_data,
-                    "clean_body_html": clean_body_html,
                     "emails": emails,
                     "phones": phones
                 }
@@ -322,8 +336,7 @@ async def capture_screenshots_playwright(url: str, output_dir: str) -> Dict[str,
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                 viewport={'width': 1920, 'height': 1080},
                 locale='en-US',  # Establecer idioma como inglés americano
-                timezone_id='America/New_York',  # Usar zona horaria estadounidense para coherencia
-                accept_language='en-US,en;q=0.9'  # Preferir contenido en inglés
+                timezone_id='America/New_York'  # Usar zona horaria estadounidense para coherencia
             )
             
             page = await context.new_page()
