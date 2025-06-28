@@ -28,7 +28,9 @@ async def scrape_url_content(url: str) -> ScrapedContent:
             )
             page = await context.new_page()
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)
-            await page.wait_for_timeout(2000)
+            
+            # Aumentamos el tiempo de espera a 5 segundos para permitir que la página cargue completamente
+            await page.wait_for_timeout(5000)
             title = await page.title()
             html_content = await page.content()
             images = await page.evaluate('''

@@ -156,8 +156,8 @@ async def scrape_url_content(url: str) -> ScrapedContent:
             # Navegar a la URL con timeout
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)
             
-            # Esperar a que la página se cargue completamente
-            await page.wait_for_timeout(2000)
+            # Esperar a que la página se cargue completamente (5 segundos)
+            await page.wait_for_timeout(5000)
             
             # Extraer información básica
             title = await page.title()
@@ -263,6 +263,9 @@ async def capture_screenshots_playwright(url: str, output_dir: str) -> Dict[str,
             
             # Esperar a que la página se cargue completamente
             await page.wait_for_load_state('networkidle')
+            
+            # Esperar 5 segundos adicionales para asegurar que todo el contenido dinámico esté cargado
+            await page.wait_for_timeout(5000)
             
             # Capturar pantalla completa
             full_screenshot = await page.screenshot(full_page=True, type='png')
