@@ -156,6 +156,9 @@ async def scrape_url_content(url: str) -> ScrapedContent:
             # Navegar a la URL con timeout
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)
             
+            # Intentar manejar diálogos de cookies comunes
+            await handle_cookie_dialogs(page)
+            
             # Esperar a que la página se cargue completamente (5 segundos)
             await page.wait_for_timeout(5000)
             
@@ -263,6 +266,9 @@ async def capture_screenshots_playwright(url: str, output_dir: str) -> Dict[str,
             
             # Esperar a que la página se cargue completamente
             await page.wait_for_load_state('networkidle')
+            
+            # Intentar manejar diálogos de cookies comunes
+            await handle_cookie_dialogs(page)
             
             # Esperar 5 segundos adicionales para asegurar que todo el contenido dinámico esté cargado
             await page.wait_for_timeout(5000)
@@ -376,3 +382,92 @@ async def scrape_url(request: UrlRequest):
 def health_check():
     """Endpoint para verificar el estado de la API"""
     return {"status": "healthy", "message": "ScraperMaster API está funcionando correctamente"}
+
+async def handle_cookie_dialogs(page):
+    """Maneja diálogos comunes de consentimiento de cookies en varios sitios web."""
+    try:
+        # Caso específico para YouTube
+        youtube_consent_buttons = [
+            'Acepto',  # Español
+            'Aceptar todo',  # Español
+            'Aceptar',  # Español
+            'Acepto todas',  # Español
+            'I Accept',  # Inglés
+            'Accept All',  # Inglés
+            'Accept',  # Inglés
+            'Agree to all',  # Inglés
+            'Agree',  # Inglés
+            'Alle akzeptieren',  # Alemán
+            'Tout accepter',  # Francés
+            'Accetta tutto'  # Italiano
+        ]
+        
+        # Espera un breve momento para que los diálogos aparezcan
+        await page.wait_for_timeout(1000)
+        
+        # Primero intenta con selectores específicos para YouTube
+        for button in youtube_consent_buttons:
+            try:
+                # Intenta hacer clic en botones con texto exacto
+                await page.click(f'text="{button}"', timeout=2000)
+                print(f"Detectado y aceptado diálogo de cookies con botón '{button}'")
+                await page.wait_for_timeout(2000)  # Espera para que el diálogo desaparezca
+                return True
+            except Exception:
+                continue
+                
+        # Intenta selectores comunes para diálogos de cookies
+        common_cookie_selectors = [
+            'button#accept', 
+            'button#acceptAll', 
+            'button.accept-cookies',
+            'button.accept-all-cookies',
+            'button.cookie-accept',
+            'button.cookie-accept-all',
+            'button.js-accept-cookies',
+            'button.js-accept-all-cookies',
+            'button[data-testid="cookie-policy-dialog-accept-button"]',
+            '#cookieConsentAcceptAll',
+            '.cookie-banner__accept-all',
+            '.cookie-consent__accept',
+            '.cookie-accept-all-button',
+            '#onetrust-accept-btn-handler',
+            '.css-47sehv'  # Selector específico para YouTube
+        ]
+        
+        for selector in common_cookie_selectors:
+            try:
+                if await page.locator(selector).count() > 0:
+                    await page.click(selector, timeout=2000)
+                    print(f"Detectado y aceptado diálogo de cookies con selector '{selector}'")
+                    await page.wait_for_timeout(2000)  # Espera para que el diálogo desaparezca
+                    return True
+            except Exception:
+                continue
+                
+        # Intenta encontrar elementos iframe que puedan contener diálogos de cookies
+        try:
+            frames = page.frames
+            for frame in frames:
+                try:
+                    # Intenta hacer clic en botones de aceptación dentro de iframes
+                    for button in youtube_consent_buttons:
+                        try:
+                            if await frame.locator(f'text="{button}"').count() > 0:
+                                await frame.click(f'text="{button}"', timeout=2000)
+                                print(f"Detectado y aceptado diálogo de cookies en iframe con botón '{button}'")
+                                await page.wait_for_timeout(2000)
+                                return True
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+        except Exception:
+            pass
+            
+        print("No se detectaron diálogos de cookies que requieran atención")
+        return False
+            
+    except Exception as e:
+        print(f"Error intentando manejar diálogos de cookies: {e}")
+        return False

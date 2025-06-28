@@ -6,7 +6,7 @@ from playwright.async_api import async_playwright
 import re
 import asyncio
 from typing import Dict, List
-from ..main import ScrapedContent, ContentProcessor
+from ..main import ScrapedContent, ContentProcessor, handle_cookie_dialogs
 
 async def scrape_url_content(url: str) -> ScrapedContent:
     """Extrae contenido de una URL usando Playwright"""
@@ -28,6 +28,9 @@ async def scrape_url_content(url: str) -> ScrapedContent:
             )
             page = await context.new_page()
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            
+            # Intentar manejar diálogos de cookies comunes
+            await handle_cookie_dialogs(page)
             
             # Aumentamos el tiempo de espera a 5 segundos para permitir que la página cargue completamente
             await page.wait_for_timeout(5000)
